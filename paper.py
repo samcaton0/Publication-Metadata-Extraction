@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from habanero import Crossref
-from config import HEADERS, EMAIL
+from config import HEADERS, EMAIL, TIMEOUT
 
 class Paper:
     def __init__(self, url: str):
@@ -18,7 +18,7 @@ class Paper:
         self._extract_metadata()
 
     def _get_html(self) -> bool:
-        response = requests.get(self.url, headers=HEADERS)
+        response = requests.get(self.url, timeout=TIMEOUT, headers=HEADERS)
 
         # Validating that the request was received correctly
         status = response.status_code
@@ -54,7 +54,7 @@ class Paper:
         cr_metadata = response['message']
 
         # Formatting author names
-        author_names = [f'{author['given']} {author['family']}' for author in cr_metadata['author']]
+        author_names = [f'{author.get('given', '')} {author.get('family', '')}' for author in cr_metadata['author']]
 
         # Updating metadata
         self.journal = cr_metadata['container-title'][0]

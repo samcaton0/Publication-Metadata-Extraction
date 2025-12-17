@@ -44,8 +44,8 @@ def run_pipeline(readfile: str, writefile: str) -> None:
     
     for url in tqdm(urls, desc='Publications'):
         paper = Paper(url)
+        papers.append(paper)
         if paper.success:
-            papers.append(paper)
             metadata.append(paper.metadata_dict())
 
     # Saving all metadata in an excel file using Pandas
