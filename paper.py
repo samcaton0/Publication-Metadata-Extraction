@@ -1,10 +1,12 @@
-import requests
+import cloudscraper
+from requests.exceptions import Timeout
+from requests import Response
 from bs4 import BeautifulSoup
 from habanero import Crossref
 from config import HEADERS, EMAIL, TIMEOUT
 
 class Paper:
-    def __init__(self, url: str):
+    def __init__(self, url: str, scraper: cloudscraper.CloudScraper=None):
         # Metadata
         self.url = url
         self.html = None
@@ -12,13 +14,35 @@ class Paper:
         self.title = None
         self.doi = None
         self.authors = None
+        self.status = None
         self.success = None
+        self.scraper = scraper
 
         # Extracting metadata
         self._extract_metadata()
 
+    def _safe_get(self) -> cloudscraper.requests.Response:
+        # Creating the scraper if not passed as argument
+        if not self.scraper:
+            self.scraper = cloudscraper.create_scraper()
+        
+        # Handling timeout exceptions to avoid crashing the pipeline
+        try:
+            response = self.scraper.get(self.url, timeout=TIMEOUT, headers=HEADERS)
+            return response
+        
+        except Timeout:
+            print(f'Timed out requesting: {self.url} after {TIMEOUT}s')
+
+            # Creating a dummy response to keep clean logic in _get_html
+            response = Response()
+            response.status_code = 408
+            response._content = b''
+            
+            return response
+
     def _get_html(self) -> bool:
-        response = requests.get(self.url, timeout=TIMEOUT, headers=HEADERS)
+        response = self._safe_get()
 
         # Validating that the request was received correctly
         status = response.status_code
