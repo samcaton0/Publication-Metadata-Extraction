@@ -1,11 +1,9 @@
-import requests
-from bs4 import BeautifulSoup
-import re
-from habanero import Crossref, RequestError
+import cloudscraper
 import pandas as pd
-from config import HEADERS, TIMEOUT, EMAIL
+from config import HEADERS
 from tqdm import tqdm
 from paper import Paper
+import time
 
 def get_urls_from_file(filepath: str) -> list:
     """
@@ -38,15 +36,19 @@ def run_pipeline(readfile: str, writefile: str) -> None:
     # Reading URLs
     urls = get_urls_from_file(readfile)
     
+    # Creating a persistent scraper used for all requests
+    scraper = cloudscraper.create_scraper()
+    scraper.headers.update(HEADERS)
+
     # Extracting metadata for each url
     papers = []
     metadata = []
     
     for url in tqdm(urls, desc='Publications'):
-        paper = Paper(url)
+        paper = Paper(url, scraper=scraper)
         papers.append(paper)
-        if paper.success:
-            metadata.append(paper.metadata_dict())
+        metadata.append(paper.metadata_dict())
+        time.sleep(2)
 
     # Saving all metadata in an excel file using Pandas
     metadata_df = pd.DataFrame(metadata)
