@@ -1,9 +1,10 @@
 import cloudscraper
 import pandas as pd
-from config import HEADERS
+from config import HEADERS, PROXY
 from tqdm import tqdm
 from paper import Paper
 import time
+from random import randint
 
 def get_urls_from_file(filepath: str) -> list:
     """
@@ -17,7 +18,7 @@ def get_urls_from_file(filepath: str) -> list:
     """
 
     urls_df = pd.read_excel(filepath)
-    urls = urls_df['url'].to_list()
+    urls = urls_df.iloc[:, 0].to_list()
 
     return urls
     
@@ -38,17 +39,20 @@ def run_pipeline(readfile: str, writefile: str) -> None:
     
     # Creating a persistent scraper used for all requests
     scraper = cloudscraper.create_scraper()
-    scraper.headers.update(HEADERS)
 
     # Extracting metadata for each url
     papers = []
     metadata = []
     
-    for url in tqdm(urls, desc='Publications'):
+    for i, url in enumerate(tqdm(urls, desc='Publications')):
+        # Rotating user agents to avoid being blocked
+        header_idx = i % len(HEADERS)
+        scraper.headers.update(HEADERS[header_idx])
+
         paper = Paper(url, scraper=scraper)
         papers.append(paper)
         metadata.append(paper.metadata_dict())
-        time.sleep(2)
+        time.sleep(randint(2,5))
 
     # Saving all metadata in an excel file using Pandas
     metadata_df = pd.DataFrame(metadata)

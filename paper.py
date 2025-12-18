@@ -4,6 +4,8 @@ from requests import Response
 from bs4 import BeautifulSoup
 from habanero import Crossref
 from config import HEADERS, EMAIL, TIMEOUT
+from numpy.random import choice
+import re
 
 class Paper:
     def __init__(self, url: str, scraper: cloudscraper.CloudScraper=None):
@@ -28,7 +30,7 @@ class Paper:
         
         # Handling timeout exceptions to avoid crashing the pipeline
         try:
-            response = self.scraper.get(self.url, timeout=TIMEOUT, headers=HEADERS)
+            response = self.scraper.get(self.url, timeout=TIMEOUT, headers=choice(HEADERS))
             return response
         
         except Timeout:
@@ -54,17 +56,29 @@ class Paper:
         return True
 
     def _extract_doi(self) -> bool:
+        # Extracting DOI from meta tags
         soup = BeautifulSoup(self.html, 'lxml')
-        doi = soup.find('meta', attrs={'name': 'citation_doi'})
 
-        # Validating that the DOI was extracted correctly
-        if not doi:
-            print(f'\nError extracting DOI for {self.url}')
-            return False
+        # Potential names for the meta tags associated with DOI
+        citation_meta_names = [
+          'citation_doi',
+          'dc.Identifier',
+      ]
         
-        self.doi = doi.get('content')
-        return True
+        # DOI format Regex
+        doi_pattern = r'^10\.\d{4,9}/[-._;()/:A-Za-z0-9]+$'
 
+        for name in citation_meta_names:
+            doi_metas = soup.find_all('meta', attrs={'name': name})
+            for doi_meta in doi_metas:
+                if re.match(doi_pattern, doi_meta.get('content')):
+                    self.doi = doi_meta.get('content')
+                    return True
+            
+        print(f'\nError extracting DOI for {self.url}')
+        print(self.html)
+        return False
+                
     def _get_crossref_metadata(self) -> bool:
         # Querying Crossref
         cr = Crossref(mailto=EMAIL)
@@ -90,7 +104,7 @@ class Paper:
     def _extract_emails(self) -> bool:
         return True
 
-    def _extract_metadata(self):
+    def _extract_metadata(self):            
         if not self._get_html():
             self.success = False
             return False
