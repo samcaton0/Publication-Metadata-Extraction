@@ -97,11 +97,62 @@ class Paper:
         # Updating metadata
         self.journal = cr_metadata['container-title'][0]
         self.title = cr_metadata['title'][0]
-        self.authors = author_names
+        self.authors = {author_name: {'email': [], 'role': None} for author_name in author_names}
+
+        # Identifying the first and last authors
+        self.authors[author_names[0]]['role'] = 'first_author'
+        self.authors[author_names[-1]]['role'] = 'last_author'
 
         return True
+    
+    def _split_name(self, author_name: str) -> tuple[str]:
+        split_name = author_name.split(' ')
+        return split_name[0].lower(), split_name[-1].lower()
+    
+    def _find_matching_author(self, email: str) -> bool:
+        best_match = {'author_name': None, 'fn_match': False, 'ln_match': False}
+
+        for author_name in self.authors.keys():
+            first_name, last_name = self._split_name(author_name)
+            
+            # If last name is not in the email, it cannot be a match
+            if not last_name in email:
+                continue
+
+            # If there is not already an author with a last name in the mail, this is the new best match
+            if not best_match['ln_match']:
+                best_match['author_name'] = author_name
+                best_match['ln_match'] = True
+            
+            # If we find an author with matching first name too, assume it is the right match and stop early
+            if first_name in email or re.search(rf'{first_name[0]}.?{last_name}', email):
+                break            
+        
+        # Validating that a match was found for the email
+        if best_match['author_name']:
+            self.authors[best_match['author_name']]['email'] = email.replace('{at}', '@')
+            return True
+        else: 
+            return False
 
     def _extract_emails(self) -> bool:
+        # Extracting emails via basic Regex
+        email_pattern = r'[A-Za-z0-9._%+-]+(?:@|\{at\})[A-Za-z0-9.-]+\.[A-Za-z.]{2,}'
+        emails = re.findall(email_pattern, self.html)
+
+        if not emails:
+            print(f'\nNo emails found for {self.url}')
+            return False
+
+        # Matching the emails to an author
+        any_matches = False
+        for email in emails:
+            any_matches |= self._find_matching_author(email)
+            
+        if not any_matches:
+            print(f'\nCould not match any emails and author names for {self.url}')
+            return False
+        
         return True
 
     def _extract_metadata(self):            
@@ -124,9 +175,16 @@ class Paper:
         self.success = True
         return True
 
-    def metadata_dict(self) -> dict:
-        return {'link': self.url,
-                'journal': self.journal,
-                'title': self.title,
-                'doi': self.doi,
-                'authors': self.authors}
+    def get_metadata(self) -> dict:
+        paper_metadata = []
+        for author_name, author_metadata in self.authors.items():
+            author_dict = {'link': self.url,
+                           'journal': self.journal,
+                           'title': self.title,
+                           'doi': self.doi,
+                           'author_name': author_name,
+                           'author_role': author_metadata['role'],
+                           'author_email': author_metadata['email']}
+            paper_metadata.append(author_dict)
+
+        return paper_metadata

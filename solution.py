@@ -1,6 +1,6 @@
 import cloudscraper
 import pandas as pd
-from config import HEADERS, PROXY
+from config import HEADERS
 from tqdm import tqdm
 from paper import Paper
 import time
@@ -51,7 +51,7 @@ def run_pipeline(readfile: str, writefile: str) -> None:
 
         paper = Paper(url, scraper=scraper)
         papers.append(paper)
-        metadata.append(paper.metadata_dict())
+        metadata += paper.get_metadata()
         time.sleep(randint(2,5))
 
     # Saving all metadata in an excel file using Pandas
