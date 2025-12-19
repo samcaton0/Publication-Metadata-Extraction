@@ -146,8 +146,10 @@ class Paper:
 
         # Matching the emails to an author
         any_matches = False
+        print(self.authors.keys())
+        print(emails)
         for email in emails:
-            any_matches |= self._find_matching_author(email)
+            any_matches |= self._find_matching_author(email.lower())
             
         if not any_matches:
             print(f'\nCould not match any emails and author names for {self.url}')

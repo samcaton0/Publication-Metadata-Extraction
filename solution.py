@@ -36,7 +36,7 @@ def run_pipeline(readfile: str, writefile: str) -> None:
 
     # Reading URLs
     urls = get_urls_from_file(readfile)
-    
+
     # Creating a persistent scraper used for all requests
     scraper = cloudscraper.create_scraper()
 
