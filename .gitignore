@@ -1,13 +1,12 @@
 # Virtual environment
 venv/
 
+# Config
+config.py
+
 # Project information documents
 info_docs/
 tutorials/
-
-# Specific data files
-data/example_output.xlsx
-data/paper_links.xlsx
 
 # Claude
 .claude/
