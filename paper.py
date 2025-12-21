@@ -93,7 +93,6 @@ class Paper:
 
         # Formatting author names
         author_names = [f'{author.get('given', '')} {author.get('family', '')}' for author in cr_metadata['author']]
-        print(author_names)
 
         # Updating metadata
         self.journal = cr_metadata['container-title'][0]
@@ -106,16 +105,17 @@ class Paper:
 
         return True
     
-    def _split_name(self, author_name: str) -> tuple[str]:
-        split_name = author_name.split(' ')
-        return split_name[0].lower(), split_name[-1].lower()
-
     def _find_emails_in_html(self, html: str) -> list:
         emails = []
 
         # Standard email pattern
         email_pattern = r'\b[A-Za-z0-9._%+-]+(?:@|\{at\})[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
-        emails.extend(re.findall(email_pattern, html))
+        raw_emails = re.findall(email_pattern, html)
+
+        # Clean query parameters from emails
+        for email in raw_emails:
+            clean_email = email.split('?')[0].split('&')[0]
+            emails.append(clean_email)
 
         # Cloudflare protected emails
         cf_pattern = r'/cdn-cgi/l/email-protection#([0-9a-f]+)'
@@ -151,51 +151,75 @@ class Paper:
             
             filtered.append(email)
 
-        return filtered
+        # Removing repeat emails
+        return set(filtered)
 
-    def _find_matching_author(self, email: str) -> bool:
-        best_match = {'author_name': None, 'fn_match': False, 'ln_match': False}
+    def _identify_corresponding_authors(self) -> None:
+        # Finding correspondence markers in HTML
+        corresp_pattern = r'correspon[ds](?:ence|ing)?.*?(?:to|:)'
+        matches = re.finditer(corresp_pattern, self.html, re.IGNORECASE)
 
-        for author_name in self.authors.keys():
-            first_name, last_name = self._split_name(author_name)
-            
-            # If last name is not in the email, it cannot be a match
-            if not last_name in email:
-                continue
+        for match in matches:
+            start = match.start()
+            chunk = self.html[start:start+500]
 
-            # If there is not already an author with a last name in the mail, this is the new best match
-            if not best_match['ln_match']:
-                best_match['author_name'] = author_name
-                best_match['ln_match'] = True
-            
-            # If we find an author with matching first name too, assume it is the right match and stop early
-            if first_name in email or re.search(rf'{first_name[0]}.?{last_name}', email):
-                break            
-        
-        # Validating that a match was found for the email
-        if best_match['author_name']:
-            self.authors[best_match['author_name']]['email'] = email.replace('{at}', '@')
-            return True
-        else: 
-            return False
+            # Check if any author name appears near correspondence marker
+            for author_name in self.authors.keys():
+                if author_name.lower() in chunk.lower():
+                    if 'corresponding_author' not in self.authors[author_name]['role']:
+                        self.authors[author_name]['role'].append('corresponding_author')
+
+            # Check if any known email appears near correspondence marker
+            for author_name, data in self.authors.items():
+                if data['email'] and data['email'] in chunk.lower():
+                    if 'corresponding_author' not in data['role']:
+                        data['role'].append('corresponding_author')
 
     def _extract_emails(self) -> bool:
-        # Extracting emails from HTML
-        emails = self._find_emails_in_html(self.html)
-        emails = self._filter_junk_emails(emails)
+        # Finding all emails and their positions in HTML
+        all_emails = self._find_emails_in_html(self.html)
+        all_emails = self._filter_junk_emails(all_emails)
 
-        if not emails:
+        if not all_emails:
             print(f'\nNo emails found for {self.url}')
             return False
 
-        # Matching the emails to an author
+        email_positions = {}
+        for email in all_emails:
+            matches = list(re.finditer(re.escape(email), self.html, re.IGNORECASE))
+            if matches:
+                email_positions[email] = matches[0].start()
+
+        # For each author, find closest email by proximity
         any_matches = False
-        for email in emails:
-            any_matches |= self._find_matching_author(email.lower())
+        for author_name in self.authors.keys():
+            author_matches = list(re.finditer(re.escape(author_name), self.html, re.IGNORECASE))
+
+            if not author_matches:
+                continue
+
+            closest_email = None
+            min_distance = float('inf')
+
+            for author_match in author_matches:
+                author_pos = author_match.start()
+
+                for email, email_pos in email_positions.items():
+                    distance = abs(author_pos - email_pos)
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_email = email
+
+            if closest_email:
+                self.authors[author_name]['email'] = closest_email.replace('{at}', '@')
+                any_matches = True
 
         if not any_matches:
             print(f'\nCould not match any emails to author names for {self.url}')
             return False
+
+        # Identify corresponding authors
+        self._identify_corresponding_authors()
 
         return True
 
