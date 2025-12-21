@@ -51,7 +51,7 @@ class Paper:
         if status != 200:
             print(f'\nError {status} fetching {self.url}')
             return False
-        
+
         self.html = response.text
         return True
 
@@ -93,22 +93,66 @@ class Paper:
 
         # Formatting author names
         author_names = [f'{author.get('given', '')} {author.get('family', '')}' for author in cr_metadata['author']]
+        print(author_names)
 
         # Updating metadata
         self.journal = cr_metadata['container-title'][0]
         self.title = cr_metadata['title'][0]
-        self.authors = {author_name: {'email': [], 'role': None} for author_name in author_names}
+        self.authors = {author_name: {'email': None, 'role': []} for author_name in author_names}
 
         # Identifying the first and last authors
-        self.authors[author_names[0]]['role'] = 'first_author'
-        self.authors[author_names[-1]]['role'] = 'last_author'
+        self.authors[author_names[0]]['role'].append('first_author')
+        self.authors[author_names[-1]]['role'].append('last_author')
 
         return True
     
     def _split_name(self, author_name: str) -> tuple[str]:
         split_name = author_name.split(' ')
         return split_name[0].lower(), split_name[-1].lower()
-    
+
+    def _find_emails_in_html(self, html: str) -> list:
+        emails = []
+
+        # Standard email pattern
+        email_pattern = r'\b[A-Za-z0-9._%+-]+(?:@|\{at\})[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+        emails.extend(re.findall(email_pattern, html))
+
+        # Cloudflare protected emails
+        cf_pattern = r'/cdn-cgi/l/email-protection#([0-9a-f]+)'
+        cf_matches = re.findall(cf_pattern, html)
+        for encoded in cf_matches:
+            try:
+                # Decode Cloudflare XOR cipher
+                key = int(encoded[:2], 16)
+                decoded = ''.join(chr(int(encoded[i:i+2], 16) ^ key) for i in range(2, len(encoded), 2))
+                emails.append(decoded)
+            except:
+                continue
+
+        return emails
+
+    def _filter_junk_emails(self, emails: list) -> list:
+        # Removing non-author emails (examples, permissions, campaigns, etc.)
+        junk_keywords = ['example', 'permission', 'campaign', 'placeholder', 'noreply',
+                         'donotreply', 'support', 'info', 'admin', 'help']
+        junk_prefixes = ['name@', 'email@', 'user@', 'author@', 'your@']
+
+        filtered = []
+        for email in emails:
+            email_lower = email.lower()
+
+            # Skip if contains junk keywords
+            if any(keyword in email_lower for keyword in junk_keywords):
+                continue
+
+            # Skip if starts with junk prefixes
+            if any(email_lower.startswith(prefix) for prefix in junk_prefixes):
+                continue
+            
+            filtered.append(email)
+
+        return filtered
+
     def _find_matching_author(self, email: str) -> bool:
         best_match = {'author_name': None, 'fn_match': False, 'ln_match': False}
 
@@ -136,9 +180,9 @@ class Paper:
             return False
 
     def _extract_emails(self) -> bool:
-        # Extracting emails via basic Regex
-        email_pattern = r'[A-Za-z0-9._%+-]+(?:@|\{at\})[A-Za-z0-9.-]+\.[A-Za-z.]{2,}'
-        emails = re.findall(email_pattern, self.html)
+        # Extracting emails from HTML
+        emails = self._find_emails_in_html(self.html)
+        emails = self._filter_junk_emails(emails)
 
         if not emails:
             print(f'\nNo emails found for {self.url}')
@@ -146,15 +190,13 @@ class Paper:
 
         # Matching the emails to an author
         any_matches = False
-        print(self.authors.keys())
-        print(emails)
         for email in emails:
             any_matches |= self._find_matching_author(email.lower())
-            
+
         if not any_matches:
-            print(f'\nCould not match any emails and author names for {self.url}')
+            print(f'\nCould not match any emails to author names for {self.url}')
             return False
-        
+
         return True
 
     def _extract_metadata(self):            
