@@ -20,7 +20,8 @@ def get_urls_from_file(filepath: str) -> list:
     urls_df = pd.read_excel(filepath)
     urls = urls_df.iloc[:, 0].to_list()
 
-    return urls
+    # Removing any duplicate URLs
+    return set(urls)
     
 def run_pipeline(readfile: str, writefile: str) -> None:
     """
