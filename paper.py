@@ -5,10 +5,11 @@ from bs4 import BeautifulSoup
 from habanero import Crossref
 from config import HEADERS, EMAIL, TIMEOUT
 from numpy.random import choice
+from html import unescape
 import re
 
 class Paper:
-    def __init__(self, url: str, scraper: cloudscraper.CloudScraper=None):
+    def __init__(self, url: str, scraper: cloudscraper.CloudScraper=None, verbose: bool=False):
         # Metadata
         self.url = url
         self.html = None
@@ -19,9 +20,28 @@ class Paper:
         self.status = None
         self.success = None
         self.scraper = scraper
+        self.verbose = verbose
+        self.errors = []
+        self.error_type = None
 
         # Extracting metadata
         self._extract_metadata()
+
+        # Log summary if verbose
+        if self.verbose:
+            self._log_summary()
+
+    def _log_error(self, error_type: str, message: str):
+        self.errors.append(f"{error_type}: {message}")
+        if not self.error_type:
+            self.error_type = error_type
+
+    def _log_summary(self):
+        if self.success:
+            email_count = sum(1 for data in self.authors.values() if data['email'])
+            print(f"✓ {self.url[:60]}... {email_count}/{len(self.authors)} emails")
+        else:
+            print(f"✗ {self.url[:60]}... {self.error_type}")
 
     def _safe_get(self) -> cloudscraper.requests.Response:
         # Creating the scraper if not passed as argument
@@ -34,13 +54,11 @@ class Paper:
             return response
         
         except Timeout:
-            print(f'Timed out requesting: {self.url} after {TIMEOUT}s')
-
             # Creating a dummy response to keep clean logic in _get_html
             response = Response()
             response.status_code = 408
             response._content = b''
-            
+
             return response
 
     def _get_html(self) -> bool:
@@ -49,7 +67,7 @@ class Paper:
         # Validating that the request was received correctly
         status = response.status_code
         if status != 200:
-            print(f'\nError {status} fetching {self.url}')
+            self._log_error('http', f'Status {status}')
             return False
 
         self.html = response.text
@@ -75,7 +93,7 @@ class Paper:
                     self.doi = doi_meta.get('content')
                     return True
             
-        print(f'\nError extracting DOI for {self.url}')
+        self._log_error('doi', 'Could not extract DOI from meta tags')
         return False
                 
     def _get_crossref_metadata(self) -> bool:
@@ -86,7 +104,7 @@ class Paper:
         # Validating that Crossref was queried successfully
         status = response['status']
         if status != 'ok':
-            print(f'\nError querying Crossref for {self.url}')
+            self._log_error('crossref', f'Query failed with status: {status}')
             return False
         cr_metadata = response['message']
 
@@ -122,6 +140,9 @@ class Paper:
         return first, middle, last
 
     def _find_emails_in_html(self, html: str) -> list:
+        # Unescape HTML entities first (&amp; → &, etc.)
+        html = unescape(html)
+
         emails = []
 
         # Standard email pattern (stops before query parameters)
@@ -133,7 +154,7 @@ class Paper:
             clean_email = email.split('?')[0].split('&')[0].strip()
             if clean_email:
                 emails.append(clean_email)
-
+                
         # Cloudflare protected emails
         cf_pattern = r'/cdn-cgi/l/email-protection#([0-9a-f]+)'
         cf_matches = re.findall(cf_pattern, html)
@@ -299,7 +320,7 @@ class Paper:
         all_emails = set(self._filter_junk_emails(all_emails))
 
         if not all_emails:
-            print(f'\nNo emails found for {self.url}')
+            self._log_error('email', 'No emails found in HTML')
             return False
 
         # Identify corresponding authors first (before email matching)
@@ -346,7 +367,7 @@ class Paper:
         # Check if any matches were found
         any_matches = any(data['email'] for data in self.authors.values())
         if not any_matches:
-            print(f'\nCould not match any emails to author names for {self.url}')
+            self._log_error('email', 'Could not match emails to author names')
             return False
 
         return True
@@ -371,7 +392,16 @@ class Paper:
         self.success = True
         return True
 
-    def get_metadata(self) -> dict:
+    def get_metadata(self) -> list:
+        if not self.success or not self.authors:
+            # Return error record for failed papers
+            return [{
+                'link': self.url,
+                'error_type': self.error_type,
+                'error_message': '; '.join(self.errors) if self.errors else 'Unknown error'
+            }]
+
+        # Return successful metadata
         paper_metadata = []
         for author_name, author_metadata in self.authors.items():
             author_dict = {'link': self.url,

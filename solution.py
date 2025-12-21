@@ -24,7 +24,18 @@ def get_urls_from_file(filepath: str) -> list:
     # Removing any duplicate URLs
     return set(urls)
     
-def run_pipeline(urls: list, writefile: str, full: bool = False) -> None:
+def _print_summary(total: int, successful: int, failed: int, error_file: str = None):
+    print("\n" + "="*60)
+    print("Pipeline Complete!")
+    print("="*60)
+    print(f"Total papers: {total}")
+    print(f"Successful: {successful} ({successful/total*100:.1f}%)")
+    print(f"Failed: {failed} ({failed/total*100:.1f}%)")
+    if failed > 0 and error_file:
+        print(f"\nError details saved to: {error_file}")
+    print("="*60)
+
+def run_pipeline(urls: list, writefile: str, full: bool = False, verbose: bool = False) -> None:
     """
     Executing the full pipeline that loads publication URLs, extracts their metadata, and writes it to a new file.
 
@@ -32,6 +43,7 @@ def run_pipeline(urls: list, writefile: str, full: bool = False) -> None:
         urls (list): List of publication URLs
         writefile (str): File path of the excel file where metadata will be written to
         full (bool): If True, save all authors. If False, only save authors with emails.
+        verbose (bool): If True, print extraction progress for each paper
 
     Returns:
         None
@@ -41,29 +53,42 @@ def run_pipeline(urls: list, writefile: str, full: bool = False) -> None:
     scraper = cloudscraper.create_scraper()
 
     # Extracting metadata for each url
-    papers = []
-    metadata = []
+    successful_metadata = []
+    failed_papers = []
 
     for i, url in enumerate(tqdm(urls, desc='Publications')):
         # Rotating user agents to avoid being blocked
         header_idx = i % len(HEADERS)
         scraper.headers.update(HEADERS[header_idx])
 
-        paper = Paper(url, scraper=scraper)
-        papers.append(paper)
+        paper = Paper(url, scraper=scraper, verbose=verbose)
+        paper_data = paper.get_metadata()
 
-        # Get metadata and filter if needed
-        paper_metadata = paper.get_metadata()
-        if not full:
-            # Only include authors with emails
-            paper_metadata = [author for author in paper_metadata if author['author_email']]
+        if paper.success:
+            if not full:
+                # Only include authors with emails
+                paper_data = [author for author in paper_data if author.get('author_email')]
+            successful_metadata += paper_data
+        else:
+            failed_papers += paper_data
 
-        metadata += paper_metadata
         time.sleep(randint(2,5))
 
-    # Saving all metadata in an excel file using Pandas
-    metadata_df = pd.DataFrame(metadata)
-    metadata_df.to_excel(writefile, index=False, header=True)
+    # Save successful extractions
+    if successful_metadata:
+        metadata_df = pd.DataFrame(successful_metadata)
+        metadata_df.to_excel(writefile, index=False, header=True)
+
+    # Save failed papers to error file
+    error_file = None
+    if failed_papers:
+        error_file = writefile.replace('.xlsx', '_errors.xlsx')
+        error_df = pd.DataFrame(failed_papers)
+        error_df.to_excel(error_file, index=False, header=True)
+
+    # Print summary
+    _print_summary(len(urls), len(set(d['link'] for d in successful_metadata)) if successful_metadata else 0,
+                   len(failed_papers), error_file)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Extract metadata from academic papers')
@@ -76,6 +101,8 @@ if __name__ == "__main__":
                         help='Output file path (default: data/metadata.xlsx)')
     parser.add_argument('--readfile',
                         help='Input file path with URLs (required unless --urls is specified)')
+    parser.add_argument('--verbose', action='store_true',
+                        help='Print detailed extraction progress for each paper')
 
     args = parser.parse_args()
 
@@ -89,4 +116,4 @@ if __name__ == "__main__":
     else:
         urls = get_urls_from_file(args.readfile)
 
-    run_pipeline(urls=urls, writefile=args.writefile, full=args.full)
+    run_pipeline(urls=urls, writefile=args.writefile, full=args.full, verbose=args.verbose)
