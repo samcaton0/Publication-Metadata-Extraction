@@ -174,22 +174,22 @@ NeuroTrends/
 
 ## How It Works
 
-1. **HTML Fetching**: Uses `cloudscraper` to bypass Cloudflare protection
+1. **HTML Fetching**: Uses `cloudscraper` to retrieve webpage HTML
 2. **DOI Extraction**: Parses meta tags for DOI
-3. **Metadata Retrieval**: Queries CrossRef API using DOI for author names and roles
+3. **Metadata Retrieval**: Queries CrossRef API using DOI for author names
 4. **Email Extraction**: Extracts emails from HTML using regex
 5. **Email Matching**:
-   - Pattern-based matching (name components in email)
-   - Proximity-based fallback (physical distance in HTML)
+   - Pattern-based matching (name components present in email)
+   - Proximity-based fallback (distance from author name in HTML)
 6. **Error Handling**: Tracks failures without stopping pipeline
 
-**Note**: To avoid being blocked by anti-bot mechanisms, there is a random delay between requests (2-5 seconds) so 60 papers will take roughly 5 minutes to process.
+**Note**: To avoid being blocked, there is a random delay between requests (2-5 seconds) so 60 papers will take roughly 5 minutes to process.
 
 ## Requirements
 
 - Python 3.8+
 - Internet connection
-- Excel file with paper URLsLicense
+- Excel file with paper URLs
 
 ## Author
 
