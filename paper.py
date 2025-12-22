@@ -39,9 +39,9 @@ class Paper:
     def _log_summary(self):
         if self.success:
             email_count = sum(1 for data in self.authors.values() if data['email'])
-            print(f"✓ {self.url[:60]}... {email_count}/{len(self.authors)} emails")
+            print(f"{self.url[:60]}... {email_count}/{len(self.authors)} emails")
         else:
-            print(f"✗ {self.url[:60]}... {self.error_type}")
+            print(f"{self.url[:60]}... {self.error_type}")
 
     def _safe_get(self) -> cloudscraper.requests.Response:
         # Creating the scraper if not passed as argument
@@ -70,6 +70,7 @@ class Paper:
             self._log_error('http', f'Status {status}')
             return False
 
+        response.encoding = 'utf-8'
         self.html = response.text
         return True
 
@@ -87,7 +88,7 @@ class Paper:
         doi_pattern = r'^10\.\d{4,9}/[-._;()/:A-Za-z0-9]+$'
 
         for name in citation_meta_names:
-            doi_metas = soup.find_all('meta', attrs={'name': name})
+            doi_metas = soup.find_all('meta', attrs={'name': name})                
             for doi_meta in doi_metas:
                 if re.match(doi_pattern, doi_meta.get('content')):
                     self.doi = doi_meta.get('content')

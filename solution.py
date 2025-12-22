@@ -1,11 +1,11 @@
 import cloudscraper
 import pandas as pd
-from config import HEADERS
 from tqdm import tqdm
-from paper import Paper
 import time
 from random import randint
 import argparse
+from config import HEADERS
+from paper import Paper
 
 def get_urls_from_file(filepath: str) -> list:
     """
