@@ -45,8 +45,9 @@ pip install -r requirements.txt
 ```
 
 ### 5. Set up config.py
- - In config_example.py, enter your email instead of 'name@example.com' to be put in the CrossRef API polite pool
- - Rename the file from config_example.py to config.py
+
+- In config_example.py, enter your email instead of 'name@example.com' to be put in the CrossRef API polite pool
+- Rename the file from config_example.py to config.py
 
 ## Input File Format
 
@@ -57,14 +58,6 @@ The pipeline requires an Excel file (`.xlsx`) with paper URLs.
 - **No header row**
 - **First column only** - all URLs should be in column A
 - Each row contains one paper URL
-
-**Example (`paper_links.xlsx`):**
-
-```
-https://www.nature.com/articles/s41586-021-03506-2
-https://www.science.org/doi/10.1126/science.abj8222
-https://www.cell.com/neuron/fulltext/S0896-6273(21)00167-1
-```
 
 ## Usage
 
@@ -129,6 +122,9 @@ python solution.py --readfile papers.xlsx --writefile results.xlsx
 - `author_name` - Author full name
 - `author_role` - Role (first_author, last_author, corresponding_author)
 - `author_email` - Email address (if found)
+- `match_method` - Email matching method (pattern, proximity, or None if no email found)
+
+**Note**: The `match_method` column indicates confidence in email-author pairing. `pattern` means the email contains name components (e.g., "jsmith@" for "John Smith"), which is more reliable. `proximity` means the match was based on HTML distance between author name and email, used when pattern matching fails or for corresponding authors.
 
 ### Failed Extractions
 
@@ -142,52 +138,96 @@ python solution.py --readfile papers.xlsx --writefile results.xlsx
 
 ## Coverage Analysis
 
-Run coverage statistics to evaluate pipeline performance:
+**Completeness Testing**: Measures how complete the extraction is (what % of emails were recovered).
 
 ```bash
-python coverage_analysis.py
+python analysis_scripts/coverage_analysis.py
 ```
 
 **Output**: `example_data/coverage_stats.xlsx`
 
 **Statistics computed**:
 
-- % of papers successfull extracted
+- % of papers successfully extracted
 - % of first authors with emails
 - % of last authors with emails
 - % of all authors with emails
 - % of papers with corresponding authors identified
 - Computed overall and per journal
 
+## Validation
+
+**Accuracy Testing**: Validates extraction accuracy against manually verified ground truth (not completeness).
+
+```bash
+python analysis_scripts/validate_extraction.py
+```
+
+**Output**: `example_data/validation_results.xlsx` (multi-sheet workbook)
+
+**Sheets**:
+- **Summary**: Overall accuracy statistics (DOI, title, journal, authors identified, email accuracy, role accuracy by type)
+- **Incorrect Papers**: Papers with DOI/title/journal mismatches
+- **Missing Authors**: Authors in ground truth but not identified by pipeline
+- **Incorrect Emails**: Mismatched email-author pairs
+
+Compares `ground_truth_metadata.xlsx` (manual extraction) with `data/metadata.xlsx` (automated)
+
 ## Project Structure
 
 ```
 NeuroTrends/
-├── paper.py                  # Paper class with extraction logic
-├── solution.py               # Pipeline orchestration with CLI
-├── coverage_analysis.py      # Coverage statistics script
-├── config.py                 # Configuration (headers, timeouts)
-├── requirements.txt          # Python dependencies
+├── paper.py                       # Paper class with extraction logic
+├── solution.py                    # Pipeline orchestration with CLI
+├── config.py                      # Configuration (headers, timeouts)
+├── requirements.txt               # Python dependencies
+├── analysis_scripts/
+│   ├── coverage_analysis.py       # Coverage statistics script
+│   └── validate_extraction.py     # Validation against ground truth
 ├── example_data/
-│   ├── paper_links.xlsx      # Example input file
-│   ├── metadata.xlsx         # Example output (successful)
-│   ├── metadata_errors.xlsx  # Example output (errors)
-│   └── coverage_stats.xlsx   # Example coverage statistics
-└── DESIGN_PROCESS.md         # Detailed design documentation
+│   ├── paper_links.xlsx           # Example input file
+│   ├── metadata.xlsx              # Example output (successful)
+│   ├── metadata_errors.xlsx       # Example output (errors)
+│   ├── coverage_stats.xlsx        # Example coverage statistics
+│   ├── ground_truth_metadata.xlsx # Manual ground truth for validation
+│   └── validation_results.xlsx    # Validation results
+└── DESIGN_PROCESS.md              # Detailed design documentation
 ```
 
 ## How It Works
 
-1. **HTML Fetching**: Uses `cloudscraper` to retrieve webpage HTML
-2. **DOI Extraction**: Parses meta tags for DOI
-3. **Metadata Retrieval**: Queries CrossRef API using DOI for author names
-4. **Email Extraction**: Extracts emails from HTML using regex
-5. **Email Matching**:
-   - Pattern-based matching (name components present in email)
-   - Proximity-based fallback (distance from author name in HTML)
-6. **Error Handling**: Tracks failures without stopping pipeline
+1. **DOI Extraction**: Parses HTML meta tags (`citation_doi`, `dc.Identifier`)
+2. **Metadata Retrieval**: Queries CrossRef API for journal, title, author names/order
+3. **Email Extraction**: Regex + Cloudflare XOR cipher decoder from static HTML
+4. **Email Matching**: Pattern scoring (name in email) → proximity fallback (HTML distance)
+5. **Error Handling**: Logs failures per-paper, outputs to separate error file
 
-**Note**: To avoid being blocked, there is a random delay between requests (2-5 seconds) so 60 papers will take roughly 5 minutes to process.
+**Note**: 2-5 second delays between requests to avoid IP blocking (~5 mins for 60 papers).
+
+## Design Decisions
+
+- **Rate limiting**: Random 2-5s delays + rotating user-agent headers to mimic human browsing and prevent IP blocking
+- **No LLMs**: Deterministic approach is faster, free, reproducible, and achieves 95%+ success without API costs
+- **CrossRef for metadata**: Authoritative source for structured author data vs. unreliable HTML parsing
+- **Hybrid email matching**: Pattern scoring handles standard cases, proximity fallback handles edge cases (lab emails, arbitrary usernames)
+
+## Assumptions
+
+- DOIs are in standard HTML meta tags
+- CrossRef metadata is complete and correctly ordered
+- Emails exist in static HTML (not JavaScript-rendered)
+- All sites use UTF-8 encoding
+- Corresponding authors are only identified when explicitly stated in HTML (proximity to "corresponding"/"correspondence" keywords) - no inference is made
+- First/last authors are determined by position in author list (no equal contribution detection)
+
+## Limitations
+
+- Cannot extract emails not present in static HTML (requires JavaScript rendering or manual access)
+- Author-email matching is heuristic and may be ambiguous with common surnames or multiple authors with similar names
+- No affiliation extraction to help disambiguate authors
+- Corresponding author identified by keyword proximity, not explicit markup (may misidentify)
+- DOI extraction fails if not in standard meta tags (some preprints, older papers)
+- Pattern matching assumes emails contain name components (fails with institutional/lab emails)
 
 ## Requirements
 

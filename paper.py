@@ -115,7 +115,7 @@ class Paper:
         # Updating metadata
         self.journal = cr_metadata['container-title'][0]
         self.title = cr_metadata['title'][0]
-        self.authors = {author_name: {'email': None, 'role': []} for author_name in author_names}
+        self.authors = {author_name: {'email': None, 'role': [], 'match_method': None} for author_name in author_names}
 
         # Identifying the first and last authors
         self.authors[author_names[0]]['role'].append('first_author')
@@ -149,10 +149,11 @@ class Paper:
         # Standard email pattern (stops before query parameters)
         email_pattern = r'\b[A-Za-z0-9._%+-]+(?:@|\{at\})[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?=\b|[?&])'
         raw_emails = re.findall(email_pattern, html)
-
+        print(raw_emails)
         # Clean any remaining artifacts
         for email in raw_emails:
             clean_email = email.split('?')[0].split('&')[0].strip()
+            print(clean_email)
             if clean_email:
                 emails.append(clean_email)
                 
@@ -240,6 +241,32 @@ class Paper:
             if f'{first}{last}' in email_prefix.replace('.', '').replace('_', ''):
                 score += 3
                 match_length += len(first) + len(last)
+
+            # Pattern 7: Progressive partial match for first name (e.g., "chris" for "christopher")
+            # Try progressively shorter versions, minimum 3 characters
+            if len(first) > 3:
+                for length in range(len(first), 2, -1):
+                    partial_first = first[:length]
+                    if partial_first in email_prefix:
+                        # Score based on percentage of name matched (0-2 points)
+                        partial_score = 2 * (length / len(first))
+                        if partial_score > score or (partial_score == score and length > match_length):
+                            score = partial_score
+                            match_length = length
+                        break  # Stop at first match (longest)
+
+            # Pattern 8: Progressive partial match for last name
+            # Try progressively shorter versions, minimum 3 characters
+            if len(last) > 3:
+                for length in range(len(last), 2, -1):
+                    partial_last = last[:length]
+                    if partial_last in email_prefix:
+                        # Score based on percentage of name matched (0-3 points)
+                        partial_score = 3 * (length / len(last))
+                        if partial_score > score or (partial_score == score and length > match_length):
+                            score = partial_score
+                            match_length = length
+                        break  # Stop at first match (longest)
 
             # Update best match (prioritize score, then match length)
             if score > best_match['score'] or (score == best_match['score'] and match_length > best_match['match_length']):
@@ -338,6 +365,7 @@ class Paper:
             matched_author = self._try_pattern_match(email.lower(), available_authors)
             if matched_author:
                 self.authors[matched_author]['email'] = email.replace('{at}', '@')
+                self.authors[matched_author]['match_method'] = 'pattern'
                 matched_emails.add(email)
                 available_authors.remove(matched_author)
 
@@ -354,6 +382,7 @@ class Paper:
             closest_email = self._find_email_after_author(author_name, remaining_emails)
             if closest_email:
                 self.authors[author_name]['email'] = closest_email.replace('{at}', '@')
+                self.authors[author_name]['match_method'] = 'proximity'
                 remaining_emails.remove(closest_email)
                 available_authors.remove(author_name)
 
@@ -362,6 +391,7 @@ class Paper:
             closest_author = self._find_author_before_email(email, available_authors)
             if closest_author:
                 self.authors[closest_author]['email'] = email.replace('{at}', '@')
+                self.authors[closest_author]['match_method'] = 'proximity'
                 remaining_emails.remove(email)
                 available_authors.remove(closest_author)
 
@@ -411,7 +441,8 @@ class Paper:
                            'doi': self.doi,
                            'author_name': author_name,
                            'author_role': author_metadata['role'],
-                           'author_email': author_metadata['email']}
+                           'author_email': author_metadata['email'],
+                           'match_method': author_metadata['match_method']}
             paper_metadata.append(author_dict)
 
         return paper_metadata

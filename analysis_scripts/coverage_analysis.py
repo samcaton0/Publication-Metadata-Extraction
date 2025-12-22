@@ -1,8 +1,13 @@
 import pandas as pd
 import cloudscraper
 import time
+import sys
+from pathlib import Path
 from random import randint
 from tqdm import tqdm
+
+# Add parent directory to path for imports
+sys.path.append(str(Path(__file__).parent.parent))
 from solution import get_urls_from_file
 from paper import Paper
 from config import HEADERS
@@ -34,7 +39,7 @@ def compute_journal_breakdown(success_df, total_by_journal):
 def run_coverage_analysis():
     """Main analysis function"""
     # Load URLs and deduplicate
-    urls = get_urls_from_file('example_data/paper_links.xlsx')
+    urls = get_urls_from_file('../example_data/paper_links.xlsx')
     unique_urls = list(set(urls))
     total_papers = len(unique_urls)
 
@@ -84,7 +89,7 @@ def run_coverage_analysis():
     stats_df = pd.concat([pd.DataFrame([overall_row]), journal_breakdown], ignore_index=True)
 
     # Save to Excel
-    stats_df.to_excel('example_data/coverage_stats.xlsx', index=False)
+    stats_df.to_excel('../example_data/coverage_stats.xlsx', index=False)
     print(f"\n\nTotal papers processed: {total_papers}")
     print(f"Successful: {papers_extracted} ({papers_extracted/total_papers*100:.1f}%)")
     print(f"Failed: {len(failed_urls)} ({len(failed_urls)/total_papers*100:.1f}%)")
