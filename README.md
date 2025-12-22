@@ -125,7 +125,7 @@ python solution.py --readfile papers.xlsx --writefile results.xlsx
 - `match_method` - Email matching method (pattern, proximity, or None if no email found)
 - `ambiguous` - True if multiple authors had identical pattern match scores for this email
 
-**Note**: The `match_method` column indicates confidence in email-author pairing. `pattern` means the email contains name components (e.g., "jsmith@" for "John Smith"), which is more reliable. `proximity` means the match was based on HTML distance between author name and email, used when pattern matching fails. When `ambiguous` is True, the same email was assigned to multiple authors because they had identical match scores (e.g., John Smith and Jane Smith matching with jsmith@domain.com).
+**Note**: The `match_method` column indicates how the email-author pairing was done. `pattern` means the email contains name components (e.g., "jsmith@" for "John Smith"), which is more reliable. `proximity` means the match was based on distance between author name and email in the HTML This is used when pattern matching fails. When `ambiguous` is True, the same email was assigned to multiple authors because they had identical match scores (e.g., John Smith and Jane Smith matching with jsmith@domain.com).
 
 ### Failed Extractions
 
@@ -168,7 +168,7 @@ python analysis_scripts/validate_extraction.py
 
 **Sheets**:
 
-- **Summary**: Overall accuracy statistics (DOI, title, journal, authors identified, email accuracy, role accuracy by type)
+- **Summary**: Overall accuracy statistics (DOI, title, journal, authors identified, email accuracy, ambiguous assignments, role accuracy by type)
 - **Incorrect Papers**: Papers with DOI/title/journal mismatches
 - **Missing Authors**: Authors in ground truth but not identified by pipeline
 - **Incorrect Emails**: Mismatched email-author pairs
@@ -198,38 +198,35 @@ NeuroTrends/
 
 ## How It Works
 
-1. **DOI Extraction**: Parses HTML meta tags (`citation_doi`, `dc.Identifier`)
-2. **Metadata Retrieval**: Queries CrossRef API for journal, title, author names/order
-3. **Email Extraction**: Regex + Cloudflare XOR cipher decoder from static HTML
-4. **Email Matching**: Pattern scoring (name in email) → proximity fallback (HTML distance)
-5. **Error Handling**: Logs failures per-paper, outputs to separate error file
+1. `clouscaper` **for HTML Extraction:** Allows bypassing of CloudFare anti-bot protection unlike `requests`
+2. **DOI Extraction**: Parses HTML meta tags (`citation_doi`, `dc.Identifier`)
+3. **Metadata Retrieval**: Queries CrossRef API for journal, title, author names/order
+4. **Email Extraction**: Regex from the static HTML
+5. **Email Matching**: Tries pattern scoring (name in email) and uses proximity as a fallback
+6. **Error Handling**: Logs failures for each paper and outputs to a separate error file
 
 **Note**: 2-5 second delays between requests to avoid IP blocking (~5 mins for 60 papers).
 
 ## Design Decisions
 
 - **Rate limiting**: Random 2-5s delays + rotating user-agent headers to mimic human browsing and prevent IP blocking
-- **No LLMs**: Deterministic approach is faster, free, reproducible, and achieves 95%+ success without API costs
-- **CrossRef for metadata**: Authoritative source for structured author data vs. unreliable HTML parsing
-- **Hybrid email matching**: Pattern scoring handles standard cases, proximity fallback handles edge cases (lab emails, arbitrary usernames)
+- **No LLMs**: Means the pipeline is deterministic, does not require paying for API credits, and does not have to wait for generation
+- **CrossRef for metadata**: More reliable and structured source of author data than HTML parsing
+- **2-Stage Email Matching**: Standard cases are handled by pattern matching but some more obscure edge case emails are handled by proximity to author names
 
 ## Assumptions
 
-- DOIs are in standard HTML meta tags
+- The paper has a DOI (almost all modern papers) and it can be found in standard HTML meta tags
 - CrossRef metadata is complete and correctly ordered
 - Emails exist in static HTML (not JavaScript-rendered)
-- All sites use UTF-8 encoding
-- Corresponding authors are only identified when explicitly stated in HTML (proximity to "corresponding"/"correspondence" keywords) - no inference is made
-- First/last authors are determined by position in author list (no equal contribution detection)
 
 ## Limitations
 
 - Cannot extract emails not present in static HTML (requires JavaScript rendering or manual access)
-- Author-email matching is heuristic and may be ambiguous with common surnames or multiple authors with similar names
-- No affiliation extraction to help disambiguate authors
-- Corresponding author identified by keyword proximity, not explicit markup (may misidentify)
+- Author-email matching may be ambiguous with common surnames or multiple authors with similar names
 - DOI extraction fails if not in standard meta tags (some preprints, older papers)
-- Pattern matching assumes emails contain name components (fails with institutional/lab emails)
+- Corresponding authors are only identified using the HTML, no inference is made (e.g. based on them being the only one with an email)\
+- Does not attempt to identify equal contributions made (e.g. joint first authorship)
 
 ## Requirements
 

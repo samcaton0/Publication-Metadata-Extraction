@@ -142,7 +142,7 @@ def compare_authors(gt_df: pd.DataFrame, meta_df: pd.DataFrame):
     return results, missing_authors, incorrect_emails
 
 def save_results(paper_results: dict, author_results: dict, incorrect_papers: list,
-                 missing_authors: list, incorrect_emails: list, output_file: str):
+                 missing_authors: list, incorrect_emails: list, output_file: str, meta_df: pd.DataFrame = None):
     """Save validation statistics to Excel with multiple sheets"""
 
     # Summary statistics
@@ -150,6 +150,15 @@ def save_results(paper_results: dict, author_results: dict, incorrect_papers: li
     total_papers = paper_results['papers']
     total_authors = author_results['total_authors']
     authors_found = author_results['authors_found']
+
+    # Count ambiguous assignments
+    ambiguous_count = 0
+    total_emails_extracted = 0
+    if meta_df is not None and 'ambiguous' in meta_df.columns:
+        # Count emails that were extracted (not None) and are ambiguous
+        emails_with_data = meta_df[meta_df['author_email'].notna()]
+        total_emails_extracted = len(emails_with_data)
+        ambiguous_count = len(emails_with_data[emails_with_data['ambiguous'] == True])
 
     # Paper metadata
     summary_data.append({
@@ -190,6 +199,15 @@ def save_results(paper_results: dict, author_results: dict, incorrect_papers: li
         'Automated Correct': author_results['emails_correct'],
         'Percentage': author_results['emails_correct'] / authors_found * 100 if authors_found > 0 else 0
     })
+
+    # Ambiguous email assignments
+    if meta_df is not None:
+        summary_data.append({
+            'Metric': 'Ambiguous Email Assignments',
+            'Ground Truth': total_emails_extracted,
+            'Automated Correct': ambiguous_count,
+            'Percentage': ambiguous_count / total_emails_extracted * 100 if total_emails_extracted > 0 else 0
+        })
 
     # Role accuracy by type
     if author_results['first_author_total'] > 0:
@@ -253,7 +271,7 @@ def run_validation():
     author_results, missing_authors, incorrect_emails = compare_authors(gt_df, meta_df)
 
     save_results(paper_results, author_results, incorrect_papers, missing_authors,
-                 incorrect_emails, '../example_data/validation_results.xlsx')
+                 incorrect_emails, '../example_data/validation_results.xlsx', meta_df)
 
 if __name__ == "__main__":
     run_validation()

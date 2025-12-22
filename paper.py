@@ -182,7 +182,7 @@ class Paper:
             return (any(kw in email_lower for kw in junk_keywords) or
                     any(email_lower.startswith(p) for p in junk_prefixes) or
                     email_domain in junk_domains)
-
+        
         return [email for email in emails if not is_junk(email)]
 
     def _try_progressive_match(self, name: str, email_prefix: str, max_score: float) -> tuple:
@@ -324,25 +324,24 @@ class Paper:
             remaining_emails.remove(email)
 
     def _extract_emails(self) -> bool:
-        # Find and filter all emails
+        """"""
+        # Finding and filtering emails from the paper HTML
         all_emails = self._find_emails_in_html(self.html)
         all_emails = set(self._filter_junk_emails(all_emails))
 
+        # Logging an error if no valid emails were found
         if not all_emails:
             self._log_error('email', 'No emails found in HTML')
             return False
 
-        # Identify corresponding authors first (before email matching)
+        # Identifying corresponding authors
         self._identify_corresponding_authors()
 
         matched_emails = set()
         available_authors = list(self.authors.keys())
 
-        # Phase 1: Pattern matching
+        # Email-author matching Stage 1: pattern matching
         for email in all_emails:
-            if email in matched_emails:
-                continue
-
             matched_authors = self._try_pattern_match(email.lower(), available_authors)
             if matched_authors:
                 is_ambiguous = len(matched_authors) > 1
@@ -351,7 +350,7 @@ class Paper:
 
         remaining_emails = all_emails - matched_emails
 
-        # Phase 2a: Proximity for corresponding authors (email after author)
+        # Email-author matching Stage 2a: 
         corresponding_authors = [name for name in available_authors
                                 if 'corresponding_author' in self.authors[name]['role']]
 
@@ -363,7 +362,7 @@ class Paper:
             if closest_email:
                 self._assign_email(author_name, closest_email, 'proximity', matched_emails, available_authors, remaining_emails)
 
-        # Phase 2b: Proximity for remaining emails (author before email)
+        # Email-author matching
         for email in list(remaining_emails):
             closest_author = self._find_closest_match(email, available_authors, 'before')
             if closest_author:
@@ -378,13 +377,17 @@ class Paper:
         return True
 
     def _extract_metadata(self):
+        """Executes all parts of the metadata extraction pipeline and checks whether any steps have failed (returned False)."""
         steps = [self._get_html, self._extract_doi, self._get_crossref_metadata, self._extract_emails]
         self.success = all(step() for step in steps)
         return self.success
 
     def get_metadata(self) -> list:
+        """Returns the metadata as a a list of dictionaries, one for each author so it is compatible with the 
+         solution pipeline. """
+        
+        # Return error record for failed papers
         if not self.success or not self.authors:
-            # Return error record for failed papers
             return [{
                 'link': self.url,
                 'error_type': self.error_type,
