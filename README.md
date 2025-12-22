@@ -6,10 +6,8 @@ Automated extraction of author contact information and metadata from academic pa
 
 - Extracts journal name, title, DOI, and author information
 - Identifies first, last, and corresponding authors
-- Matches author emails using pattern-based and proximity-based algorithms
-- Bypasses Cloudflare email protection with XOR cipher decoding
-- Comprehensive error tracking and coverage statistics
-- 95%+ success rate across major neuroscience journals
+- Matches author emails using pattern-based and proximity-based approaches
+- Tracks errors and coverage statistics
 
 ## Setup
 
