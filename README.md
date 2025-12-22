@@ -123,8 +123,9 @@ python solution.py --readfile papers.xlsx --writefile results.xlsx
 - `author_role` - Role (first_author, last_author, corresponding_author)
 - `author_email` - Email address (if found)
 - `match_method` - Email matching method (pattern, proximity, or None if no email found)
+- `ambiguous` - True if multiple authors had identical pattern match scores for this email
 
-**Note**: The `match_method` column indicates confidence in email-author pairing. `pattern` means the email contains name components (e.g., "jsmith@" for "John Smith"), which is more reliable. `proximity` means the match was based on HTML distance between author name and email, used when pattern matching fails or for corresponding authors.
+**Note**: The `match_method` column indicates confidence in email-author pairing. `pattern` means the email contains name components (e.g., "jsmith@" for "John Smith"), which is more reliable. `proximity` means the match was based on HTML distance between author name and email, used when pattern matching fails. When `ambiguous` is True, the same email was assigned to multiple authors because they had identical match scores (e.g., John Smith and Jane Smith matching with jsmith@domain.com).
 
 ### Failed Extractions
 
@@ -166,6 +167,7 @@ python analysis_scripts/validate_extraction.py
 **Output**: `example_data/validation_results.xlsx` (multi-sheet workbook)
 
 **Sheets**:
+
 - **Summary**: Overall accuracy statistics (DOI, title, journal, authors identified, email accuracy, role accuracy by type)
 - **Incorrect Papers**: Papers with DOI/title/journal mismatches
 - **Missing Authors**: Authors in ground truth but not identified by pipeline

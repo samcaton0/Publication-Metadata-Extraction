@@ -115,7 +115,7 @@ class Paper:
         # Updating metadata
         self.journal = cr_metadata['container-title'][0]
         self.title = cr_metadata['title'][0]
-        self.authors = {author_name: {'email': None, 'role': [], 'match_method': None} for author_name in author_names}
+        self.authors = {author_name: {'email': None, 'role': [], 'match_method': None, 'ambiguous': False} for author_name in author_names}
 
         # Identifying the first and last authors
         self.authors[author_names[0]]['role'].append('first_author')
@@ -196,9 +196,10 @@ class Paper:
                 return score, length
         return 0, 0
 
-    def _try_pattern_match(self, email: str, available_authors: list) -> str:
+    def _try_pattern_match(self, email: str, available_authors: list) -> list:
         # Try to match email to author using name patterns with scoring
-        best_match = {'author_name': None, 'score': 0, 'match_length': 0}
+        # Returns list of authors (can be multiple if tied)
+        author_scores = []
         email_prefix = email.split('@')[0].lower()
 
         for author_name in available_authors:
@@ -250,13 +251,24 @@ class Paper:
                 score = last_partial_score
                 match_length = last_partial_len
 
-            # Update best match (prioritize score, then match length)
-            if score > best_match['score'] or (score == best_match['score'] and match_length > best_match['match_length']):
-                best_match['author_name'] = author_name
-                best_match['score'] = score
-                best_match['match_length'] = match_length
+            if score > 0:
+                author_scores.append({'author_name': author_name, 'score': score, 'match_length': match_length})
 
-        return best_match['author_name']
+        if not author_scores:
+            return []
+
+        # Find the best score and match_length
+        best_score = max(a['score'] for a in author_scores)
+        best_matches = [a for a in author_scores if a['score'] == best_score]
+
+        if len(best_matches) == 1:
+            return [best_matches[0]['author_name']]
+
+        # Multiple authors with same score - check match_length
+        best_length = max(a['match_length'] for a in best_matches)
+        tied_matches = [a['author_name'] for a in best_matches if a['match_length'] == best_length]
+
+        return tied_matches
 
     def _find_closest_match(self, text: str, candidates: list, direction: str = 'after') -> str:
         """Find closest candidate to text in HTML (direction: 'after' or 'before')"""
@@ -300,12 +312,14 @@ class Paper:
                         self.authors[author_name]['role'].append('corresponding_author')
 
     def _assign_email(self, author_name: str, email: str, method: str,
-                      matched_emails: set, available_authors: list, remaining_emails: set = None):
+                      matched_emails: set, available_authors: list, remaining_emails: set = None, ambiguous: bool = False):
         """Assign email to author and update tracking sets"""
         self.authors[author_name]['email'] = email.replace('{at}', '@')
         self.authors[author_name]['match_method'] = method
+        self.authors[author_name]['ambiguous'] = ambiguous
         matched_emails.add(email)
-        available_authors.remove(author_name)
+        if author_name in available_authors:
+            available_authors.remove(author_name)
         if remaining_emails and email in remaining_emails:
             remaining_emails.remove(email)
 
@@ -329,9 +343,11 @@ class Paper:
             if email in matched_emails:
                 continue
 
-            matched_author = self._try_pattern_match(email.lower(), available_authors)
-            if matched_author:
-                self._assign_email(matched_author, email, 'pattern', matched_emails, available_authors)
+            matched_authors = self._try_pattern_match(email.lower(), available_authors)
+            if matched_authors:
+                is_ambiguous = len(matched_authors) > 1
+                for matched_author in matched_authors:
+                    self._assign_email(matched_author, email, 'pattern', matched_emails, available_authors, ambiguous=is_ambiguous)
 
         remaining_emails = all_emails - matched_emails
 
@@ -385,7 +401,8 @@ class Paper:
                            'author_name': author_name,
                            'author_role': author_metadata['role'],
                            'author_email': author_metadata['email'],
-                           'match_method': author_metadata['match_method']}
+                           'match_method': author_metadata['match_method'],
+                           'ambiguous': author_metadata['ambiguous']}
             paper_metadata.append(author_dict)
 
         return paper_metadata
