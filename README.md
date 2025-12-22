@@ -1,6 +1,6 @@
-# NeuroTrends Metadata Extraction Pipeline
+# Metadata Extraction Pipeline
 
-Automated extraction of author contact information and metadata from academic paper URLs for the NeuroTrends research project.
+Automated extraction of author contact information and metadata from academic paper URLs.
 
 ## Features
 
@@ -43,6 +43,10 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+### 5. Set up config.py
+ - In config_example.py, enter your email instead of 'name@example.com' to be put in the CrossRef API polite pool
+ - Rename the file from config_example.py to config.py
 
 ## Input File Format
 
