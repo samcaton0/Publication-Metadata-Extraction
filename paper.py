@@ -144,19 +144,10 @@ class Paper:
         # Unescape HTML entities first (&amp; → &, etc.)
         html = unescape(html)
 
-        emails = []
-
         # Standard email pattern (stops before query parameters)
         email_pattern = r'\b[A-Za-z0-9._%+-]+(?:@|\{at\})[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?=\b|[?&])'
         raw_emails = re.findall(email_pattern, html)
-        print(raw_emails)
-        # Clean any remaining artifacts
-        for email in raw_emails:
-            clean_email = email.split('?')[0].split('&')[0].strip()
-            print(clean_email)
-            if clean_email:
-                emails.append(clean_email)
-                
+
         # Cloudflare protected emails
         cf_pattern = r'/cdn-cgi/l/email-protection#([0-9a-f]+)'
         cf_matches = re.findall(cf_pattern, html)
@@ -165,39 +156,45 @@ class Paper:
                 # Decode Cloudflare XOR cipher
                 key = int(encoded[:2], 16)
                 decoded = ''.join(chr(int(encoded[i:i+2], 16) ^ key) for i in range(2, len(encoded), 2))
-                emails.append(decoded)
+                raw_emails.append(decoded)
             except:
                 continue
+
+        emails = []
+
+        # Clean any remaining artifacts
+        for email in raw_emails:
+            clean_email = email.split('?')[0].split('&')[0].strip()
+            if clean_email:
+                emails.append(clean_email)
 
         return emails
 
     def _filter_junk_emails(self, emails: list) -> list:
-        # Removing non-author emails (examples, permissions, campaigns, etc.)
         junk_keywords = ['example', 'permission', 'campaign', 'placeholder', 'noreply',
                          'donotreply', 'support', 'info', 'admin', 'help']
         junk_prefixes = ['name@', 'email@', 'user@', 'author@', 'your@']
         junk_domains = ['university.edu', 'university.ac.uk', 'example.com', 'example.org']
 
-        filtered = []
-        for email in emails:
+        def is_junk(email: str) -> bool:
             email_lower = email.lower()
-
-            # Skip if contains junk keywords
-            if any(keyword in email_lower for keyword in junk_keywords):
-                continue
-
-            # Skip if starts with junk prefixes
-            if any(email_lower.startswith(prefix) for prefix in junk_prefixes):
-                continue
-
-            # Skip if generic domain
             email_domain = email_lower.split('@')[1] if '@' in email_lower else ''
-            if email_domain in junk_domains:
-                continue
+            return (any(kw in email_lower for kw in junk_keywords) or
+                    any(email_lower.startswith(p) for p in junk_prefixes) or
+                    email_domain in junk_domains)
 
-            filtered.append(email)
+        return [email for email in emails if not is_junk(email)]
 
-        return filtered
+    def _try_progressive_match(self, name: str, email_prefix: str, max_score: float) -> tuple:
+        """Try progressively shorter versions of name, return (score, length)"""
+        if len(name) <= 3:
+            return 0, 0
+
+        for length in range(len(name), 2, -1):
+            if name[:length] in email_prefix:
+                score = max_score * (length / len(name))
+                return score, length
+        return 0, 0
 
     def _try_pattern_match(self, email: str, available_authors: list) -> str:
         # Try to match email to author using name patterns with scoring
@@ -242,31 +239,16 @@ class Paper:
                 score += 3
                 match_length += len(first) + len(last)
 
-            # Pattern 7: Progressive partial match for first name (e.g., "chris" for "christopher")
-            # Try progressively shorter versions, minimum 3 characters
-            if len(first) > 3:
-                for length in range(len(first), 2, -1):
-                    partial_first = first[:length]
-                    if partial_first in email_prefix:
-                        # Score based on percentage of name matched (0-2 points)
-                        partial_score = 2 * (length / len(first))
-                        if partial_score > score or (partial_score == score and length > match_length):
-                            score = partial_score
-                            match_length = length
-                        break  # Stop at first match (longest)
+            # Pattern 7 & 8: Progressive partial matching for first and last names
+            first_partial_score, first_partial_len = self._try_progressive_match(first, email_prefix, 2.0)
+            if first_partial_score > score or (first_partial_score == score and first_partial_len > match_length):
+                score = first_partial_score
+                match_length = first_partial_len
 
-            # Pattern 8: Progressive partial match for last name
-            # Try progressively shorter versions, minimum 3 characters
-            if len(last) > 3:
-                for length in range(len(last), 2, -1):
-                    partial_last = last[:length]
-                    if partial_last in email_prefix:
-                        # Score based on percentage of name matched (0-3 points)
-                        partial_score = 3 * (length / len(last))
-                        if partial_score > score or (partial_score == score and length > match_length):
-                            score = partial_score
-                            match_length = length
-                        break  # Stop at first match (longest)
+            last_partial_score, last_partial_len = self._try_progressive_match(last, email_prefix, 3.0)
+            if last_partial_score > score or (last_partial_score == score and last_partial_len > match_length):
+                score = last_partial_score
+                match_length = last_partial_len
 
             # Update best match (prioritize score, then match length)
             if score > best_match['score'] or (score == best_match['score'] and match_length > best_match['match_length']):
@@ -276,53 +258,28 @@ class Paper:
 
         return best_match['author_name']
 
-    def _find_email_after_author(self, author_name: str, available_emails: set) -> str:
-        # Find email that comes soonest after author's first occurrence
-        author_match = re.search(re.escape(author_name), self.html, re.IGNORECASE)
-        if not author_match:
+    def _find_closest_match(self, text: str, candidates: list, direction: str = 'after') -> str:
+        """Find closest candidate to text in HTML (direction: 'after' or 'before')"""
+        text_match = re.search(re.escape(text), self.html, re.IGNORECASE)
+        if not text_match:
             return None
 
-        author_pos = author_match.start()
-
-        # Find emails that come after this position
-        closest_email = None
+        text_pos = text_match.start()
+        closest = None
         min_distance = float('inf')
 
-        for email in available_emails:
-            email_match = re.search(re.escape(email), self.html, re.IGNORECASE)
-            if email_match:
-                email_pos = email_match.start()
-                if email_pos > author_pos:  # Email must come AFTER author
-                    distance = email_pos - author_pos
+        for candidate in candidates:
+            match = re.search(re.escape(candidate), self.html, re.IGNORECASE)
+            if match:
+                candidate_pos = match.start()
+                if (direction == 'after' and candidate_pos > text_pos) or \
+                   (direction == 'before' and candidate_pos < text_pos):
+                    distance = abs(candidate_pos - text_pos)
                     if distance < min_distance:
                         min_distance = distance
-                        closest_email = email
+                        closest = candidate
 
-        return closest_email
-
-    def _find_author_before_email(self, email: str, available_authors: list) -> str:
-        # Find author that comes soonest before email's first occurrence
-        email_match = re.search(re.escape(email), self.html, re.IGNORECASE)
-        if not email_match:
-            return None
-
-        email_pos = email_match.start()
-
-        # Find authors that come before this position
-        closest_author = None
-        min_distance = float('inf')
-
-        for author_name in available_authors:
-            author_match = re.search(re.escape(author_name), self.html, re.IGNORECASE)
-            if author_match:
-                author_pos = author_match.start()
-                if author_pos < email_pos:  # Author must come BEFORE email
-                    distance = email_pos - author_pos
-                    if distance < min_distance:
-                        min_distance = distance
-                        closest_author = author_name
-
-        return closest_author
+        return closest
 
     def _identify_corresponding_authors(self) -> None:
         # Find tags containing correspondence markers using BeautifulSoup
@@ -341,6 +298,16 @@ class Paper:
                 if author_name.lower() in tag_text.lower():
                     if 'corresponding_author' not in self.authors[author_name]['role']:
                         self.authors[author_name]['role'].append('corresponding_author')
+
+    def _assign_email(self, author_name: str, email: str, method: str,
+                      matched_emails: set, available_authors: list, remaining_emails: set = None):
+        """Assign email to author and update tracking sets"""
+        self.authors[author_name]['email'] = email.replace('{at}', '@')
+        self.authors[author_name]['match_method'] = method
+        matched_emails.add(email)
+        available_authors.remove(author_name)
+        if remaining_emails and email in remaining_emails:
+            remaining_emails.remove(email)
 
     def _extract_emails(self) -> bool:
         # Find and filter all emails
@@ -364,10 +331,7 @@ class Paper:
 
             matched_author = self._try_pattern_match(email.lower(), available_authors)
             if matched_author:
-                self.authors[matched_author]['email'] = email.replace('{at}', '@')
-                self.authors[matched_author]['match_method'] = 'pattern'
-                matched_emails.add(email)
-                available_authors.remove(matched_author)
+                self._assign_email(matched_author, email, 'pattern', matched_emails, available_authors)
 
         remaining_emails = all_emails - matched_emails
 
@@ -379,21 +343,15 @@ class Paper:
             if self.authors[author_name]['email']:
                 continue
 
-            closest_email = self._find_email_after_author(author_name, remaining_emails)
+            closest_email = self._find_closest_match(author_name, list(remaining_emails), 'after')
             if closest_email:
-                self.authors[author_name]['email'] = closest_email.replace('{at}', '@')
-                self.authors[author_name]['match_method'] = 'proximity'
-                remaining_emails.remove(closest_email)
-                available_authors.remove(author_name)
+                self._assign_email(author_name, closest_email, 'proximity', matched_emails, available_authors, remaining_emails)
 
         # Phase 2b: Proximity for remaining emails (author before email)
         for email in list(remaining_emails):
-            closest_author = self._find_author_before_email(email, available_authors)
+            closest_author = self._find_closest_match(email, available_authors, 'before')
             if closest_author:
-                self.authors[closest_author]['email'] = email.replace('{at}', '@')
-                self.authors[closest_author]['match_method'] = 'proximity'
-                remaining_emails.remove(email)
-                available_authors.remove(closest_author)
+                self._assign_email(closest_author, email, 'proximity', matched_emails, available_authors, remaining_emails)
 
         # Check if any matches were found
         any_matches = any(data['email'] for data in self.authors.values())
@@ -403,25 +361,10 @@ class Paper:
 
         return True
 
-    def _extract_metadata(self):            
-        if not self._get_html():
-            self.success = False
-            return False
-        
-        if not self._extract_doi():
-            self.success = False
-            return False
-
-        if not self._get_crossref_metadata():
-            self.success = False
-            return False 
-
-        if not self._extract_emails():
-            self.success = False
-            return False
-
-        self.success = True
-        return True
+    def _extract_metadata(self):
+        steps = [self._get_html, self._extract_doi, self._get_crossref_metadata, self._extract_emails]
+        self.success = all(step() for step in steps)
+        return self.success
 
     def get_metadata(self) -> list:
         if not self.success or not self.authors:
