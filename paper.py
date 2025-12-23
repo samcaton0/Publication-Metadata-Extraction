@@ -9,6 +9,7 @@ from html import unescape
 import re
 
 class Paper:
+    """Class to manage the extraction of metadata for a single paper."""
     def __init__(self, url: str, scraper: cloudscraper.CloudScraper=None, verbose: bool=False):
         # Metadata
         self.url = url
