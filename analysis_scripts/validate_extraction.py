@@ -1,6 +1,17 @@
 import pandas as pd
+from typing import Dict, List, Tuple, Optional
 
-def load_data(ground_truth_file: str, metadata_file: str):
+def add_metric(metric: str, ground_truth: int, automated: int, summary_data: List[Dict[str, any]]) -> None:
+    """Add a metric row to summary data"""
+    percentage = automated / ground_truth * 100 if ground_truth > 0 else 0
+    summary_data.append({
+        'Metric': metric,
+        'Ground Truth': ground_truth,
+        'Automated Correct': automated,
+        'Percentage': percentage
+    })
+
+def load_data(ground_truth_file: str, metadata_file: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Load ground truth and metadata, filter to common links"""
     gt_df = pd.read_excel(ground_truth_file)
     meta_df = pd.read_excel(metadata_file)
@@ -13,7 +24,7 @@ def load_data(ground_truth_file: str, metadata_file: str):
 
     return gt_df, meta_df
 
-def compare_paper_metadata(gt_df: pd.DataFrame, meta_df: pd.DataFrame):
+def compare_paper_metadata(gt_df: pd.DataFrame, meta_df: pd.DataFrame) -> Tuple[Dict[str, int], List[Dict[str, str]]]:
     """Compare DOI, title, journal per paper"""
     results = {'papers': 0, 'doi_correct': 0, 'title_correct': 0, 'journal_correct': 0}
     incorrect_papers = []
@@ -63,7 +74,7 @@ def compare_paper_metadata(gt_df: pd.DataFrame, meta_df: pd.DataFrame):
 
     return results, incorrect_papers
 
-def compare_authors(gt_df: pd.DataFrame, meta_df: pd.DataFrame):
+def compare_authors(gt_df: pd.DataFrame, meta_df: pd.DataFrame) -> Tuple[Dict[str, int], List[Dict[str, str]], List[Dict[str, str]]]:
     """Compare author identification and email/role matching"""
     results = {
         'authors_found': 0,
@@ -124,25 +135,17 @@ def compare_authors(gt_df: pd.DataFrame, meta_df: pd.DataFrame):
 
                 # Check role match by type
                 if pd.notna(gt_role) and pd.notna(meta_row['author_role']):
-                    if 'first_author' in gt_role:
-                        results['first_author_total'] += 1
-                        if 'first_author' in meta_row['author_role']:
-                            results['first_author_correct'] += 1
-
-                    if 'last_author' in gt_role:
-                        results['last_author_total'] += 1
-                        if 'last_author' in meta_row['author_role']:
-                            results['last_author_correct'] += 1
-
-                    if 'corresponding_author' in gt_role:
-                        results['corresponding_author_total'] += 1
-                        if 'corresponding_author' in meta_row['author_role']:
-                            results['corresponding_author_correct'] += 1
+                    for role in ['first_author', 'last_author', 'corresponding_author']:
+                        if role in gt_role:
+                            results[f'{role}_total'] += 1
+                            if role in meta_row['author_role']:
+                                results[f'{role}_correct'] += 1
 
     return results, missing_authors, incorrect_emails
 
-def save_results(paper_results: dict, author_results: dict, incorrect_papers: list,
-                 missing_authors: list, incorrect_emails: list, output_file: str, meta_df: pd.DataFrame = None):
+def save_results(paper_results: Dict[str, int], author_results: Dict[str, int], incorrect_papers: List[Dict[str, str]],
+                 missing_authors: List[Dict[str, str]], incorrect_emails: List[Dict[str, str]], output_file: str,
+                 meta_df: Optional[pd.DataFrame] = None) -> None:
     """Save validation statistics to Excel with multiple sheets"""
 
     # Summary statistics
@@ -161,78 +164,30 @@ def save_results(paper_results: dict, author_results: dict, incorrect_papers: li
         ambiguous_count = len(emails_with_data[emails_with_data['ambiguous'] == True])
 
     # Paper metadata
-    summary_data.append({
-        'Metric': 'Total Papers',
-        'Ground Truth': total_papers,
-        'Automated Correct': total_papers,
-        'Percentage': 100.0
-    })
-    summary_data.append({
-        'Metric': 'DOI Correct',
-        'Ground Truth': total_papers,
-        'Automated Correct': paper_results['doi_correct'],
-        'Percentage': paper_results['doi_correct'] / total_papers * 100 if total_papers > 0 else 0
-    })
-    summary_data.append({
-        'Metric': 'Title Correct',
-        'Ground Truth': total_papers,
-        'Automated Correct': paper_results['title_correct'],
-        'Percentage': paper_results['title_correct'] / total_papers * 100 if total_papers > 0 else 0
-    })
-    summary_data.append({
-        'Metric': 'Journal Correct',
-        'Ground Truth': total_papers,
-        'Automated Correct': paper_results['journal_correct'],
-        'Percentage': paper_results['journal_correct'] / total_papers * 100 if total_papers > 0 else 0
-    })
+    add_metric('Total Papers', total_papers, total_papers, summary_data)
+    add_metric('DOI Correct', total_papers, paper_results['doi_correct'], summary_data)
+    add_metric('Title Correct', total_papers, paper_results['title_correct'], summary_data)
+    add_metric('Journal Correct', total_papers, paper_results['journal_correct'], summary_data)
 
     # Author identification
-    summary_data.append({
-        'Metric': 'Authors Identified',
-        'Ground Truth': total_authors,
-        'Automated Correct': authors_found,
-        'Percentage': authors_found / total_authors * 100 if total_authors > 0 else 0
-    })
-    summary_data.append({
-        'Metric': 'Emails Correct',
-        'Ground Truth': authors_found,
-        'Automated Correct': author_results['emails_correct'],
-        'Percentage': author_results['emails_correct'] / authors_found * 100 if authors_found > 0 else 0
-    })
+    add_metric('Authors Identified', total_authors, authors_found, summary_data)
+    add_metric('Emails Correct', authors_found, author_results['emails_correct'], summary_data)
 
     # Ambiguous email assignments
     if meta_df is not None:
-        summary_data.append({
-            'Metric': 'Ambiguous Email Assignments',
-            'Ground Truth': total_emails_extracted,
-            'Automated Correct': ambiguous_count,
-            'Percentage': ambiguous_count / total_emails_extracted * 100 if total_emails_extracted > 0 else 0
-        })
+        add_metric('Ambiguous Email Assignments', total_emails_extracted, ambiguous_count, summary_data)
 
     # Role accuracy by type
-    if author_results['first_author_total'] > 0:
-        summary_data.append({
-            'Metric': 'First Author Role Correct',
-            'Ground Truth': author_results['first_author_total'],
-            'Automated Correct': author_results['first_author_correct'],
-            'Percentage': author_results['first_author_correct'] / author_results['first_author_total'] * 100
-        })
+    role_types = [
+        ('First Author Role Correct', 'first_author'),
+        ('Last Author Role Correct', 'last_author'),
+        ('Corresponding Author Role Correct', 'corresponding_author')
+    ]
 
-    if author_results['last_author_total'] > 0:
-        summary_data.append({
-            'Metric': 'Last Author Role Correct',
-            'Ground Truth': author_results['last_author_total'],
-            'Automated Correct': author_results['last_author_correct'],
-            'Percentage': author_results['last_author_correct'] / author_results['last_author_total'] * 100
-        })
-
-    if author_results['corresponding_author_total'] > 0:
-        summary_data.append({
-            'Metric': 'Corresponding Author Role Correct',
-            'Ground Truth': author_results['corresponding_author_total'],
-            'Automated Correct': author_results['corresponding_author_correct'],
-            'Percentage': author_results['corresponding_author_correct'] / author_results['corresponding_author_total'] * 100
-        })
+    for metric_name, role in role_types:
+        if author_results[f'{role}_total'] > 0:
+            add_metric(metric_name, author_results[f'{role}_total'],
+                      author_results[f'{role}_correct'], summary_data)
 
     summary_df = pd.DataFrame(summary_data)
 
@@ -260,7 +215,7 @@ def save_results(paper_results: dict, author_results: dict, incorrect_papers: li
     if incorrect_emails:
         print(f"{len(incorrect_emails)} incorrect email assignments (see 'Incorrect Emails' sheet)")
 
-def run_validation():
+def run_validation() -> None:
     """Main validation function"""
     gt_df, meta_df = load_data('../example_data/ground_truth_metadata.xlsx', '../example_data/metadata.xlsx')
 

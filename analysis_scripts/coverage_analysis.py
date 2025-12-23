@@ -12,7 +12,24 @@ from solution import get_urls_from_file
 from paper import Paper
 from config import HEADERS
 
-def compute_journal_breakdown(success_df, total_by_journal):
+def get_role_subsets(df: pd.DataFrame) -> dict:
+    """Returns a dictionary of dataframes that are filtered by author role"""
+    return {
+        'first': df[df['author_role'].apply(lambda x: 'first_author' in x)],
+        'last': df[df['author_role'].apply(lambda x: 'last_author' in x)],
+        'corresponding': df[df['author_role'].apply(lambda x: 'corresponding_author' in x)]
+    }
+
+def compute_stats(df: pd.DataFrame, papers: int, roles_dict: dict) -> dict:
+    """Compute statistics about the % of successful email/role extraction for each author role"""
+    return {
+        'First Author Email %': roles_dict['first']['author_email'].notna().sum() / len(roles_dict['first']) * 100 if len(roles_dict['first']) > 0 else 0,
+        'Last Author Email %': roles_dict['last']['author_email'].notna().sum() / len(roles_dict['last']) * 100 if len(roles_dict['last']) > 0 else 0,
+        'All Authors Email %': df['author_email'].notna().sum() / len(df) * 100 if len(df) > 0 else 0,
+        'Corresponding Identified %': roles_dict['corresponding']['link'].nunique() / papers * 100 if papers > 0 else 0
+    }
+
+def compute_journal_breakdown(success_df: pd.DataFrame, total_by_journal: dict) -> pd.DataFrame:
     """Compute all statistics grouped by journal"""
     journal_stats = []
 
@@ -21,22 +38,18 @@ def compute_journal_breakdown(success_df, total_by_journal):
         papers = journal_df['link'].nunique()
         total_papers_journal = total_by_journal.get(journal, papers)
 
-        first_authors = journal_df[journal_df['author_role'].apply(lambda x: 'first_author' in x)]
-        last_authors = journal_df[journal_df['author_role'].apply(lambda x: 'last_author' in x)]
-        corresponding = journal_df[journal_df['author_role'].apply(lambda x: 'corresponding_author' in x)]
+        roles = get_role_subsets(journal_df)
+        stats = compute_stats(journal_df, papers, roles)
 
         journal_stats.append({
             'Journal': journal,
             'Papers Success %': papers / total_papers_journal * 100,
-            'First Author Email %': first_authors['author_email'].notna().sum() / len(first_authors) * 100 if len(first_authors) > 0 else 0,
-            'Last Author Email %': last_authors['author_email'].notna().sum() / len(last_authors) * 100 if len(last_authors) > 0 else 0,
-            'All Authors Email %': journal_df['author_email'].notna().sum() / len(journal_df) * 100,
-            'Corresponding Identified %': corresponding['link'].nunique() / papers * 100
+            **stats
         })
 
     return pd.DataFrame(journal_stats).sort_values('Papers Success %', ascending=False)
 
-def run_coverage_analysis():
+def run_coverage_analysis() -> None:
     """Main analysis function"""
     # Load URLs and deduplicate
     urls = get_urls_from_file('../example_data/paper_links.xlsx')
@@ -67,17 +80,13 @@ def run_coverage_analysis():
     papers_extracted = success_df['link'].nunique() if not success_df.empty else 0
 
     # Compute overall statistics
-    first_authors = success_df[success_df['author_role'].apply(lambda x: 'first_author' in x)]
-    last_authors = success_df[success_df['author_role'].apply(lambda x: 'last_author' in x)]
-    corresponding = success_df[success_df['author_role'].apply(lambda x: 'corresponding_author' in x)]
+    roles = get_role_subsets(success_df)
+    stats = compute_stats(success_df, papers_extracted, roles)
 
     overall_row = {
         'Journal': 'OVERALL',
         'Papers Success %': papers_extracted / total_papers * 100,
-        'First Author Email %': first_authors['author_email'].notna().sum() / len(first_authors) * 100 if len(first_authors) > 0 else 0,
-        'Last Author Email %': last_authors['author_email'].notna().sum() / len(last_authors) * 100 if len(last_authors) > 0 else 0,
-        'All Authors Email %': success_df['author_email'].notna().sum() / len(success_df) * 100 if len(success_df) > 0 else 0,
-        'Corresponding Identified %': corresponding['link'].nunique() / papers_extracted * 100 if papers_extracted > 0 else 0
+        **stats
     }
 
     # Track total papers by journal (need to count from both success and failures)
